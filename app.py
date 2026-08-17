@@ -1,58 +1,56 @@
-from flask import Flask, request, redirect, url_for, flash, session, render_template_string
+from flask import (
+    Flask,
+    request,
+    redirect,
+    url_for,
+    flash,
+    session,
+    render_template_string
+)
+
 from email.message import EmailMessage
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
+
 from datetime import datetime
+from urllib.parse import urlparse
+
 import smtplib
 import ssl
 import os
-import re
 import uuid
 import hashlib
+import re
 
 
 # =========================================================
-# SHOVIX — PREMIUM PROFILE STUDIO
-# Single File Version — Hardened
+# SHOVIX — ALL-IN-ONE APP
+# ملف واحد فقط: app.py
 # =========================================================
 
 load_dotenv()
 
 app = Flask(__name__)
 
-# ---------------------------------------------------------
-# SECRET_KEY: إجباري من .env — بدون قيمة افتراضية
-# لأن أي مفتاح ثابت مكتوب في الكود المصدري نفسه يضعف
-# تشفير الـ session بشكل خطير لو الكود بقى معروف/عام.
-# ---------------------------------------------------------
-app.secret_key = os.getenv("SECRET_KEY")
-
-if not app.secret_key:
-    raise RuntimeError(
-        "SECRET_KEY غير موجود في ملف .env — أضِفه قبل تشغيل السيرفر.\n"
-        "ولّده بالأمر: python3 -c \"import secrets; print(secrets.token_hex(32))\""
-    )
+app.secret_key = os.getenv(
+    "SECRET_KEY",
+    "CHANGE_THIS_SECRET_KEY_IN_ENV"
+)
 
 # =========================================================
-# EMAIL
+# SECURITY / CONFIG
 # =========================================================
 
-OWNER_EMAIL = os.getenv("OWNER_EMAIL", "").strip()
+app.config["MAX_CONTENT_LENGTH"] = 15 * 1024 * 1024
 
-# Gmail App Password أحيانًا بييجي بمسافات (abcd efgh ijkl mnop)
-# لازم نشيلها عشان الـ SMTP login ينجح مهما كانت الطريقة اللي
-# المستخدم لصق بيها الباسورد في .env
-GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "").replace(" ", "").strip()
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
-if not OWNER_EMAIL:
-    print("⚠️  تحذير: OWNER_EMAIL غير موجود في .env — الإرسال هيفشل عند أول طلب.")
-
-if not GMAIL_APP_PASSWORD:
-    print("⚠️  تحذير: GMAIL_APP_PASSWORD غير موجود في .env — الإرسال هيفشل عند أول طلب.")
-
-# =========================================================
-# UPLOAD
-# =========================================================
+# إذا كان الموقع يعمل HTTPS فعّلها من .env:
+# SESSION_COOKIE_SECURE=true
+app.config["SESSION_COOKIE_SECURE"] = (
+    os.getenv("SESSION_COOKIE_SECURE", "false").lower() == "true"
+)
 
 ALLOWED_EXTENSIONS = {
     "png",
@@ -62,11 +60,19 @@ ALLOWED_EXTENSIONS = {
     "pdf"
 }
 
-MAX_FILE_SIZE = 15 * 1024 * 1024
+MAX_FILES = 8
 
-app.config["MAX_CONTENT_LENGTH"] = MAX_FILE_SIZE
 
-EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+# =========================================================
+# EMAIL SETTINGS
+# =========================================================
+
+OWNER_EMAIL = os.getenv("OWNER_EMAIL", "").strip()
+
+GMAIL_APP_PASSWORD = os.getenv(
+    "GMAIL_APP_PASSWORD",
+    ""
+).strip()
 
 
 # =========================================================
@@ -84,28 +90,19 @@ HTML = r"""
 <meta name="viewport"
       content="width=device-width, initial-scale=1.0">
 
-<title>SHOVIX — استوديو تصميم البروفايلات الاحترافية</title>
+<meta name="theme-color" content="#0b0e14">
 
 <meta name="description"
-      content="SHOVIX — تصميم صفحات بروفايل احترافية ومميزة تعكس هويتك الرقمية.">
+      content="SHOVIX — استوديو تصميم البروفايلات الاحترافية. نصمم هويتك الرقمية بطريقة فاخرة ومميزة.">
 
-<link rel="preconnect"
-      href="https://fonts.googleapis.com">
-
-<link rel="preconnect"
-      href="https://fonts.gstatic.com"
-      crossorigin>
-
-<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@500;600;700;800;900&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap"
-      rel="stylesheet">
+<title>SHOVIX — Premium Profile Studio</title>
 
 <style>
 
 :root{
-
     --bg:#080a0f;
     --panel:#10141c;
-    --panel2:#151a23;
+    --panel2:#151a24;
     --line:#242b38;
 
     --gold:#c9a227;
@@ -113,15 +110,12 @@ HTML = r"""
 
     --white:#f5f3ec;
 
-    --muted:#8c95a5;
-    --muted2:#5e6777;
+    --text:#c8cdd6;
+    --muted:#7d8695;
+    --muted2:#596171;
 
-    --success:#4caf7d;
-    --danger:#df5b51;
-
-    --display:'Cairo',sans-serif;
-    --body:'IBM Plex Sans Arabic',sans-serif;
-    --mono:'JetBrains Mono',monospace;
+    --green:#49b47f;
+    --red:#e15d54;
 
     --radius:16px;
 }
@@ -137,28 +131,26 @@ html{
 }
 
 body{
-
-    min-height:100vh;
-
     background:
-
         radial-gradient(
-            circle at 85% -10%,
+            circle at 80% -10%,
             rgba(201,162,39,.16),
-            transparent 42%
+            transparent 35%
         ),
-
         radial-gradient(
-            circle at 0% 35%,
+            circle at 0% 30%,
             rgba(201,162,39,.07),
-            transparent 38%
+            transparent 30%
         ),
-
         var(--bg);
 
     color:var(--white);
 
-    font-family:var(--body);
+    font-family:
+        Arial,
+        "Segoe UI",
+        Tahoma,
+        sans-serif;
 
     line-height:1.7;
 
@@ -166,37 +158,26 @@ body{
 }
 
 body::before{
-
     content:"";
-
     position:fixed;
-
     inset:0;
 
     pointer-events:none;
 
-    opacity:.22;
+    opacity:.025;
 
     background-image:
-
         linear-gradient(
-            rgba(255,255,255,.025) 1px,
+            rgba(255,255,255,.5) 1px,
             transparent 1px
         ),
-
         linear-gradient(
             90deg,
-            rgba(255,255,255,.025) 1px,
+            rgba(255,255,255,.5) 1px,
             transparent 1px
         );
 
-    background-size:50px 50px;
-
-    mask-image:linear-gradient(
-        to bottom,
-        black,
-        transparent 85%
-    );
+    background-size:45px 45px;
 }
 
 a{
@@ -211,22 +192,18 @@ textarea{
     font:inherit;
 }
 
+button{
+    border:0;
+}
+
 ::selection{
     background:var(--gold);
     color:var(--bg);
 }
 
-.wrap{
-
+.container{
     width:min(1120px, calc(100% - 40px));
-
     margin:auto;
-}
-
-/* focus visibility */
-a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible{
-    outline:2px solid var(--gold2);
-    outline-offset:3px;
 }
 
 
@@ -235,61 +212,50 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 ========================================================= */
 
 header{
-
     position:sticky;
-
     top:0;
-
     z-index:100;
 
-    background:rgba(8,10,15,.84);
+    background:rgba(8,10,15,.86);
 
     backdrop-filter:blur(18px);
+    -webkit-backdrop-filter:blur(18px);
 
-    border-bottom:1px solid var(--line);
+    border-bottom:1px solid rgba(255,255,255,.07);
 }
 
-.nav{
-
-    min-height:74px;
+.navbar{
+    min-height:76px;
 
     display:flex;
-
     align-items:center;
-
     justify-content:space-between;
 
-    gap:25px;
+    gap:20px;
 }
 
-.brand{
-
+.logo{
     display:flex;
-
     align-items:center;
-
     gap:10px;
 
-    font-family:var(--display);
-
+    font-size:23px;
     font-weight:900;
 
-    font-size:21px;
-
-    letter-spacing:.5px;
+    letter-spacing:1px;
 }
 
-.badge{
-
+.logo-mark{
     width:30px;
-
     height:30px;
 
-    display:grid;
-
-    place-items:center;
+    display:flex;
+    align-items:center;
+    justify-content:center;
 
     border-radius:50%;
+
+    color:var(--bg);
 
     background:
         linear-gradient(
@@ -298,18 +264,13 @@ header{
             var(--gold)
         );
 
-    box-shadow:
-        0 0 30px rgba(201,162,39,.2);
-}
-
-.badge svg{
-    width:15px;
+    font-size:15px;
+    font-weight:900;
 }
 
 .nav-links{
-
     display:flex;
-
+    align-items:center;
     gap:30px;
 
     color:var(--muted);
@@ -318,47 +279,82 @@ header{
 }
 
 .nav-links a{
-
-    transition:.2s;
+    transition:.2s ease;
 }
 
 .nav-links a:hover{
     color:var(--white);
 }
 
-.nav-cta{
+.nav-button{
+    background:var(--gold);
+    color:var(--bg);
 
     padding:10px 20px;
 
     border-radius:999px;
 
-    background:var(--gold);
-
-    color:var(--bg);
-
     font-weight:800;
-
     font-size:14px;
 
-    transition:.2s;
+    transition:.2s ease;
 }
 
-.nav-cta:hover{
-
+.nav-button:hover{
     background:var(--gold2);
-
     transform:translateY(-2px);
 }
 
-@media(max-width:760px){
 
-    .nav-links{
-        display:none;
-    }
+/* =========================================================
+   FLASH
+========================================================= */
 
-    .nav{
-        padding:0 5px;
-    }
+.flash-container{
+    position:fixed;
+
+    top:92px;
+    left:50%;
+
+    transform:translateX(-50%);
+
+    width:min(
+        calc(100% - 30px),
+        560px
+    );
+
+    z-index:500;
+
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+}
+
+.flash{
+    padding:15px 18px;
+
+    border-radius:13px;
+
+    border:1px solid;
+
+    backdrop-filter:blur(14px);
+
+    box-shadow:
+        0 20px 60px rgba(0,0,0,.4);
+
+    font-size:14px;
+}
+
+.flash.success{
+    background:rgba(73,180,127,.12);
+    border-color:rgba(73,180,127,.4);
+    color:#bdebd2;
+}
+
+.flash.error{
+    background:rgba(225,93,84,.12);
+    border-color:rgba(225,93,84,.4);
+    color:#ffd0cc;
 }
 
 
@@ -367,51 +363,43 @@ header{
 ========================================================= */
 
 .hero{
-
-    min-height:650px;
+    min-height:calc(100vh - 76px);
 
     display:grid;
-
-    grid-template-columns:1.05fr .95fr;
+    grid-template-columns:
+        minmax(0,1.05fr)
+        minmax(360px,.95fr);
 
     align-items:center;
 
     gap:70px;
 
-    padding-top:70px;
-
-    padding-bottom:80px;
+    padding:80px 0;
 }
 
-.eyebrow{
-
+.badge{
     display:inline-flex;
-
     align-items:center;
-
     gap:9px;
 
     padding:7px 14px;
 
     border-radius:999px;
 
-    border:1px solid rgba(201,162,39,.3);
+    border:1px solid
+        rgba(201,162,39,.3);
 
-    background:rgba(201,162,39,.07);
+    background:
+        rgba(201,162,39,.07);
 
     color:var(--gold2);
 
-    font-family:var(--mono);
-
-    font-size:11px;
-
+    font-size:12px;
     letter-spacing:1px;
 }
 
-.dot{
-
+.badge-dot{
     width:7px;
-
     height:7px;
 
     border-radius:50%;
@@ -419,20 +407,20 @@ header{
     background:var(--gold2);
 
     box-shadow:
-        0 0 12px var(--gold);
+        0 0 14px var(--gold2);
 }
 
 .hero h1{
+    margin-top:22px;
 
-    margin-top:23px;
+    font-size:
+        clamp(
+            38px,
+            6vw,
+            66px
+        );
 
-    max-width:700px;
-
-    font-family:var(--display);
-
-    font-size:clamp(38px,5.5vw,64px);
-
-    line-height:1.16;
+    line-height:1.15;
 
     font-weight:900;
 }
@@ -441,9 +429,8 @@ header{
     color:var(--gold2);
 }
 
-.lead{
-
-    max-width:590px;
+.hero-description{
+    max-width:650px;
 
     margin-top:22px;
 
@@ -452,10 +439,8 @@ header{
     font-size:17px;
 }
 
-.actions{
-
+.hero-buttons{
     display:flex;
-
     flex-wrap:wrap;
 
     gap:12px;
@@ -464,179 +449,155 @@ header{
 }
 
 .btn{
-
     display:inline-flex;
 
     align-items:center;
-
     justify-content:center;
 
     gap:9px;
 
-    padding:14px 25px;
+    min-height:50px;
+
+    padding:0 24px;
 
     border-radius:999px;
 
-    cursor:pointer;
-
     font-weight:800;
 
-    transition:.2s;
+    cursor:pointer;
+
+    transition:.22s ease;
 }
 
 .btn-primary{
-
     background:var(--gold);
-
     color:var(--bg);
-
-    border:1px solid var(--gold);
 }
 
 .btn-primary:hover{
-
     background:var(--gold2);
-
     transform:translateY(-2px);
 
     box-shadow:
-        0 15px 40px rgba(201,162,39,.2);
+        0 15px 40px
+        rgba(201,162,39,.2);
 }
 
 .btn-secondary{
-
     border:1px solid var(--line);
-
     color:var(--white);
 
     background:rgba(255,255,255,.02);
 }
 
 .btn-secondary:hover{
-
     border-color:var(--gold);
-
-    background:rgba(201,162,39,.05);
+    background:rgba(201,162,39,.06);
 }
 
 .stats{
-
     display:flex;
+    flex-wrap:wrap;
 
-    gap:35px;
+    gap:30px;
 
     margin-top:45px;
 
-    padding-top:25px;
+    padding-top:28px;
 
     border-top:1px solid var(--line);
 }
 
 .stat strong{
-
     display:block;
-
-    font-family:var(--mono);
 
     color:var(--gold2);
 
-    font-size:20px;
+    font-size:24px;
 }
 
 .stat span{
-
-    display:block;
-
     color:var(--muted2);
 
     font-size:12px;
-
-    margin-top:3px;
 }
 
 
 /* =========================================================
-   PROFILE CARD
+   HERO CARD
 ========================================================= */
 
-.stage{
-
-    min-height:460px;
-
+.visual{
     position:relative;
 
-    display:grid;
-
-    place-items:center;
-
-    perspective:1200px;
-}
-
-.profile-card{
-
-    width:310px;
-
-    padding:28px;
-
-    border-radius:24px;
-
-    border:1px solid var(--line);
-
-    background:
-        linear-gradient(
-            155deg,
-            #191f2a,
-            #10141c
-        );
-
-    box-shadow:
-        0 50px 100px rgba(0,0,0,.55);
-
-    transform:
-        rotateY(-10deg)
-        rotateX(6deg);
-
-    transition:
-        transform .2s ease;
-}
-
-.card-top{
+    min-height:480px;
 
     display:flex;
 
-    justify-content:space-between;
+    align-items:center;
+    justify-content:center;
+}
 
+.profile-card{
+    width:min(330px, 90%);
+
+    padding:30px 25px;
+
+    border-radius:25px;
+
+    background:
+        linear-gradient(
+            150deg,
+            #1a202b,
+            #0e1219
+        );
+
+    border:1px solid var(--line);
+
+    box-shadow:
+        0 45px 100px
+        rgba(0,0,0,.65);
+
+    transform:
+        perspective(1000px)
+        rotateY(-9deg)
+        rotateX(5deg);
+
+    transition:transform .15s ease;
+}
+
+.card-top{
+    display:flex;
     align-items:flex-start;
+    justify-content:space-between;
 }
 
 .avatar{
+    width:68px;
+    height:68px;
 
-    width:65px;
-
-    height:65px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
 
     border-radius:50%;
-
-    padding:4px;
 
     background:
         conic-gradient(
             var(--gold2),
             var(--gold),
-            #687080,
+            #555,
             var(--gold2)
         );
 }
 
 .avatar-inner{
+    width:59px;
+    height:59px;
 
-    width:100%;
-
-    height:100%;
-
-    display:grid;
-
-    place-items:center;
+    display:flex;
+    align-items:center;
+    justify-content:center;
 
     border-radius:50%;
 
@@ -644,83 +605,63 @@ header{
 
     color:var(--gold2);
 
-    font-family:var(--display);
-
+    font-size:20px;
     font-weight:900;
-
-    font-size:19px;
 }
 
 .verified{
-
-    display:flex;
-
-    align-items:center;
-
-    gap:6px;
-
-    padding:5px 9px;
+    padding:6px 10px;
 
     border-radius:999px;
 
-    border:1px solid rgba(76,174,125,.35);
+    color:#9de2bd;
 
-    background:rgba(76,174,125,.08);
+    border:1px solid
+        rgba(73,180,127,.35);
 
-    color:#8bd8b0;
+    background:
+        rgba(73,180,127,.08);
 
-    font-family:var(--mono);
-
-    font-size:9px;
+    font-size:11px;
 }
 
-.profile-name{
+.card-name{
+    margin-top:17px;
 
-    margin-top:18px;
-
-    font-family:var(--display);
-
-    font-size:20px;
-
+    font-size:21px;
     font-weight:900;
 }
 
-.handle{
-
+.card-handle{
     color:var(--muted);
 
     font-size:13px;
 }
 
-.lines{
+.card-lines{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
 
     margin-top:25px;
-
-    display:grid;
-
-    gap:9px;
 }
 
-.lines i{
+.card-lines i{
+    display:block;
 
     height:8px;
 
-    border-radius:20px;
+    border-radius:99px;
 
     background:var(--line);
 }
 
-.lines i:nth-child(1){
-    width:100%;
+.card-lines i:nth-child(2){
+    width:75%;
 }
 
-.lines i:nth-child(2){
-    width:78%;
-}
-
-.lines i:nth-child(3){
-
-    width:54%;
+.card-lines i:nth-child(3){
+    width:55%;
 
     background:
         linear-gradient(
@@ -730,10 +671,8 @@ header{
         );
 }
 
-.metrics{
-
+.card-metrics{
     display:grid;
-
     grid-template-columns:repeat(3,1fr);
 
     gap:10px;
@@ -745,39 +684,36 @@ header{
     border-top:1px solid var(--line);
 }
 
-.metrics b{
-
+.card-metrics strong{
     display:block;
 
-    font-family:var(--mono);
-
-    font-size:13px;
+    font-size:14px;
 }
 
-.metrics span{
-
+.card-metrics span{
     color:var(--muted2);
 
     font-size:10px;
 }
 
 .float{
-
     position:absolute;
 
     padding:10px 14px;
 
     border-radius:12px;
 
+    background:var(--panel);
+
     border:1px solid var(--line);
 
-    background:var(--panel2);
+    box-shadow:
+        0 20px 50px
+        rgba(0,0,0,.5);
 
     color:var(--muted);
 
     font-size:12px;
-
-    box-shadow:0 20px 50px rgba(0,0,0,.4);
 
     animation:float 5s ease-in-out infinite;
 }
@@ -787,23 +723,18 @@ header{
 }
 
 .float.one{
-
     top:12%;
-
     right:2%;
 }
 
 .float.two{
-
-    bottom:10%;
-
-    left:0;
+    bottom:12%;
+    left:2%;
 
     animation-delay:1.2s;
 }
 
 @keyframes float{
-
     0%,100%{
         transform:translateY(0);
     }
@@ -813,62 +744,42 @@ header{
     }
 }
 
-@media(prefers-reduced-motion: reduce){
-    .float{ animation:none; }
-    html{ scroll-behavior:auto; }
-}
-
-@media(max-width:900px){
-
-    .hero{
-
-        grid-template-columns:1fr;
-
-        gap:20px;
-
-        padding-top:50px;
-    }
-
-    .stage{
-        min-height:430px;
-    }
-}
-
 
 /* =========================================================
    SECTIONS
 ========================================================= */
 
-.section{
+section{
+    scroll-margin-top:90px;
+}
 
-    padding:80px 0;
+.section{
+    padding:85px 0;
 
     border-top:1px solid var(--line);
 }
 
-.section-head{
-
-    max-width:600px;
+.section-title{
+    max-width:650px;
 
     margin-bottom:42px;
 }
 
-.section-head h2{
-
+.section-title h2{
     margin-top:15px;
 
-    font-family:var(--display);
+    font-size:
+        clamp(
+            28px,
+            4vw,
+            42px
+        );
 
-    font-weight:900;
-
-    font-size:clamp(28px,4vw,40px);
-
-    line-height:1.3;
+    line-height:1.2;
 }
 
-.section-head p{
-
-    margin-top:10px;
+.section-title p{
+    margin-top:12px;
 
     color:var(--muted);
 
@@ -881,82 +792,63 @@ header{
 ========================================================= */
 
 .steps{
-
     display:grid;
 
-    grid-template-columns:repeat(3,1fr);
+    grid-template-columns:
+        repeat(3,1fr);
 
-    gap:18px;
+    gap:20px;
 }
 
 .step{
-
-    position:relative;
-
-    overflow:hidden;
-
     padding:28px;
+
+    background:var(--panel);
 
     border:1px solid var(--line);
 
     border-radius:var(--radius);
 
-    background:var(--panel);
-
-    transition:.25s;
+    transition:.25s ease;
 }
 
 .step:hover{
-
     transform:translateY(-5px);
 
-    border-color:rgba(201,162,39,.4);
+    border-color:
+        rgba(201,162,39,.4);
 }
 
-.number{
+.step-number{
+    width:38px;
+    height:38px;
 
-    width:36px;
-
-    height:36px;
-
-    display:grid;
-
-    place-items:center;
-
-    margin-bottom:18px;
-
-    border:1px solid rgba(201,162,39,.4);
+    display:flex;
+    align-items:center;
+    justify-content:center;
 
     border-radius:50%;
 
-    color:var(--gold2);
+    border:1px solid
+        rgba(201,162,39,.35);
 
-    font-family:var(--mono);
+    color:var(--gold2);
 
     font-size:12px;
 }
 
 .step h3{
-
-    font-family:var(--display);
+    margin-top:20px;
 
     font-size:19px;
-
-    margin-bottom:8px;
 }
 
 .step p{
+    margin-top:8px;
 
     color:var(--muted);
 
     font-size:14px;
-}
-
-@media(max-width:800px){
-
-    .steps{
-        grid-template-columns:1fr;
-    }
 }
 
 
@@ -965,59 +857,42 @@ header{
 ========================================================= */
 
 .features{
-
     display:grid;
 
-    grid-template-columns:repeat(4,1fr);
+    grid-template-columns:
+        repeat(4,1fr);
 
     gap:1px;
 
-    background:var(--line);
+    overflow:hidden;
 
     border:1px solid var(--line);
 
     border-radius:var(--radius);
 
-    overflow:hidden;
+    background:var(--line);
 }
 
 .feature{
-
-    padding:25px;
+    padding:26px 20px;
 
     background:var(--panel);
 }
 
 .feature strong{
-
     display:block;
 
-    font-family:var(--display);
-
     font-size:15px;
-
-    margin-bottom:5px;
 }
 
 .feature span{
+    display:block;
+
+    margin-top:6px;
 
     color:var(--muted2);
 
-    font-size:12.5px;
-}
-
-@media(max-width:850px){
-
-    .features{
-        grid-template-columns:repeat(2,1fr);
-    }
-}
-
-@media(max-width:500px){
-
-    .features{
-        grid-template-columns:1fr;
-    }
+    font-size:12px;
 }
 
 
@@ -1026,27 +901,27 @@ header{
 ========================================================= */
 
 .order{
-
     padding:90px 0 110px;
 
     border-top:1px solid var(--line);
 }
 
 .order-box{
-
     display:grid;
 
-    grid-template-columns:.8fr 1.2fr;
+    grid-template-columns:
+        .75fr
+        1.25fr;
 
-    gap:45px;
+    gap:40px;
 
-    padding:45px;
+    padding:42px;
 
-    border-radius:22px;
+    background:var(--panel);
 
     border:1px solid var(--line);
 
-    background:var(--panel);
+    border-radius:22px;
 
     position:relative;
 
@@ -1054,18 +929,15 @@ header{
 }
 
 .order-box::before{
-
     content:"";
 
     position:absolute;
 
-    width:500px;
+    width:400px;
+    height:400px;
 
-    height:500px;
-
-    top:-300px;
-
-    right:-200px;
+    right:-180px;
+    top:-220px;
 
     background:
         radial-gradient(
@@ -1078,60 +950,47 @@ header{
 }
 
 .order-info{
-
     position:relative;
-
     z-index:1;
 }
 
 .order-info h2{
-
-    margin-top:16px;
-
-    font-family:var(--display);
-
-    font-weight:900;
+    margin-top:17px;
 
     font-size:30px;
 }
 
 .order-info p{
-
-    margin-top:13px;
+    margin-top:12px;
 
     color:var(--muted);
 
     font-size:14px;
 }
 
-.checks{
+.check-list{
+    display:flex;
 
-    display:grid;
+    flex-direction:column;
 
-    gap:14px;
+    gap:13px;
 
-    margin-top:28px;
+    margin-top:27px;
 
     list-style:none;
 }
 
-.checks li{
-
+.check-list li{
     display:flex;
 
-    align-items:flex-start;
-
-    gap:10px;
+    gap:9px;
 
     color:var(--muted);
 
-    font-size:13.5px;
+    font-size:13px;
 }
 
 .check{
-
-    flex-shrink:0;
-
     color:var(--gold2);
 }
 
@@ -1141,27 +1000,27 @@ header{
 ========================================================= */
 
 .order-form{
-
     position:relative;
 
     z-index:2;
 
-    display:grid;
+    display:flex;
+
+    flex-direction:column;
 
     gap:17px;
 }
 
 .form-row{
-
     display:grid;
 
-    grid-template-columns:1fr 1fr;
+    grid-template-columns:
+        repeat(2,1fr);
 
     gap:15px;
 }
 
 .field label{
-
     display:block;
 
     margin-bottom:7px;
@@ -1178,123 +1037,109 @@ header{
 .field input,
 .field select,
 .field textarea{
-
     width:100%;
-
-    padding:13px 14px;
 
     border:1px solid var(--line);
 
-    border-radius:10px;
+    border-radius:11px;
 
     background:var(--panel2);
 
     color:var(--white);
 
+    padding:13px 14px;
+
     outline:none;
 
-    transition:.2s;
-}
+    font-size:14px;
 
-.field textarea{
-
-    min-height:130px;
-
-    resize:vertical;
+    transition:.2s ease;
 }
 
 .field input::placeholder,
 .field textarea::placeholder{
-
     color:var(--muted2);
 }
 
 .field input:focus,
 .field select:focus,
 .field textarea:focus{
-
     border-color:var(--gold);
 
-    background:#181d27;
+    background:#171c25;
 
     box-shadow:
-        0 0 0 3px rgba(201,162,39,.06);
+        0 0 0 3px
+        rgba(201,162,39,.06);
 }
 
-.dropzone{
+.field textarea{
+    min-height:130px;
 
+    resize:vertical;
+}
+
+.field select{
+    cursor:pointer;
+}
+
+.file-box{
     position:relative;
 
-    padding:25px;
+    border:1px dashed #343d4c;
+
+    border-radius:13px;
+
+    padding:24px;
 
     text-align:center;
 
-    border:1.5px dashed var(--line);
-
-    border-radius:12px;
-
-    cursor:pointer;
-
-    background:rgba(255,255,255,.01);
-
-    transition:.2s;
+    transition:.2s ease;
 }
 
-.dropzone:hover,
-.dropzone.drag{
-
+.file-box:hover{
     border-color:var(--gold);
 
-    background:rgba(201,162,39,.04);
+    background:
+        rgba(201,162,39,.04);
 }
 
-.dropzone input{
-
+.file-box input{
     position:absolute;
 
     inset:0;
-
-    width:100%;
-
-    height:100%;
 
     opacity:0;
 
     cursor:pointer;
 }
 
-.upload-icon{
+.file-icon{
+    color:var(--gold2);
 
     font-size:25px;
-
-    color:var(--gold2);
 }
 
-.upload-text{
-
+.file-title{
     margin-top:7px;
 
-    color:var(--muted);
+    color:var(--text);
 
     font-size:13px;
 }
 
-.upload-text b{
-    color:var(--gold2);
-}
-
-.upload-hint{
+.file-hint{
+    margin-top:4px;
 
     color:var(--muted2);
 
     font-size:11px;
-
-    margin-top:5px;
 }
 
-.files-list{
+.file-list{
+    display:flex;
 
-    display:grid;
+    flex-direction:column;
 
     gap:6px;
 
@@ -1302,170 +1147,57 @@ header{
 }
 
 .file-item{
-
     display:flex;
+
+    align-items:center;
 
     justify-content:space-between;
 
     gap:10px;
 
-    padding:8px 11px;
+    padding:8px 10px;
+
+    border:1px solid var(--line);
 
     border-radius:8px;
 
     background:var(--panel2);
 
-    border:1px solid var(--line);
-
     color:var(--muted);
 
-    font-family:var(--mono);
-
-    font-size:10px;
+    font-size:11px;
 }
 
 .submit{
+    width:100%;
 
-    display:flex;
-
-    align-items:center;
-
-    gap:15px;
-
-    flex-wrap:wrap;
-
-    margin-top:5px;
-}
-
-.submit button{
-
-    border:0;
-
-    min-width:170px;
-
-    padding:14px 22px;
-
-    border-radius:999px;
+    min-height:52px;
 
     background:var(--gold);
 
     color:var(--bg);
 
-    cursor:pointer;
+    border-radius:11px;
 
     font-weight:900;
 
-    transition:.2s;
+    cursor:pointer;
+
+    transition:.2s ease;
 }
 
-.submit button:hover{
-
+.submit:hover{
     background:var(--gold2);
 
-    transform:translateY(-2px);
+    transform:translateY(-1px);
 }
 
-.submit button:disabled{
-
+.submit:disabled{
     opacity:.55;
 
     cursor:not-allowed;
 
     transform:none;
-}
-
-.submit-note{
-
-    color:var(--muted2);
-
-    font-size:11px;
-}
-
-@media(max-width:900px){
-
-    .order-box{
-
-        grid-template-columns:1fr;
-
-        padding:28px;
-    }
-}
-
-@media(max-width:560px){
-
-    .form-row{
-        grid-template-columns:1fr;
-    }
-}
-
-
-/* =========================================================
-   FLASH
-========================================================= */
-
-.flash-container{
-
-    position:fixed;
-
-    top:88px;
-
-    left:50%;
-
-    transform:translateX(-50%);
-
-    z-index:500;
-
-    width:min(92%,500px);
-
-    display:grid;
-
-    gap:10px;
-}
-
-.flash{
-
-    padding:14px 17px;
-
-    border-radius:12px;
-
-    border:1px solid;
-
-    box-shadow:0 20px 50px rgba(0,0,0,.4);
-
-    animation:flashIn .3s ease;
-
-    font-size:13px;
-}
-
-.flash.success{
-
-    color:#c8f0da;
-
-    background:rgba(76,174,125,.12);
-
-    border-color:rgba(76,174,125,.35);
-}
-
-.flash.error{
-
-    color:#ffd0cb;
-
-    background:rgba(225,89,79,.12);
-
-    border-color:rgba(225,89,79,.35);
-}
-
-@keyframes flashIn{
-
-    from{
-        opacity:0;
-        transform:translateY(-10px);
-    }
-
-    to{
-        opacity:1;
-        transform:translateY(0);
-    }
 }
 
 
@@ -1474,14 +1206,12 @@ header{
 ========================================================= */
 
 footer{
-
     border-top:1px solid var(--line);
 
     padding:30px 0;
 }
 
 .footer{
-
     display:flex;
 
     align-items:center;
@@ -1493,11 +1223,10 @@ footer{
     flex-wrap:wrap;
 }
 
-.footer p{
-
+.footer-text{
     color:var(--muted2);
 
-    font-size:11px;
+    font-size:12px;
 }
 
 
@@ -1505,69 +1234,190 @@ footer{
    MOBILE
 ========================================================= */
 
-@media(max-width:600px){
+@media(max-width:900px){
 
-    .wrap{
-        width:min(100% - 28px,1120px);
+    .hero{
+        grid-template-columns:1fr;
+
+        padding:
+            60px 0
+            70px;
+
+        gap:30px;
     }
 
-    .hero h1{
-        font-size:39px;
+    .visual{
+        min-height:400px;
     }
 
-    .lead{
-        font-size:15px;
+    .steps{
+        grid-template-columns:1fr;
     }
 
-    .stats{
-        gap:18px;
-    }
-
-    .stat strong{
-        font-size:16px;
-    }
-
-    .stat span{
-        font-size:10px;
-    }
-
-    .profile-card{
-        width:285px;
-    }
-
-    .float.one{
-        right:-5px;
-    }
-
-    .float.two{
-        left:-5px;
-    }
-
-    .order{
-        padding-top:60px;
+    .features{
+        grid-template-columns:
+            repeat(2,1fr);
     }
 
     .order-box{
-        padding:20px;
+        grid-template-columns:1fr;
+
+        padding:28px;
     }
+
+}
+
+@media(max-width:650px){
+
+    .container{
+        width:
+            min(
+                100% - 28px,
+                1120px
+            );
+    }
+
+    .navbar{
+        min-height:68px;
+    }
+
+    .nav-links{
+        display:none;
+    }
+
+    .nav-button{
+        padding:9px 14px;
+
+        font-size:12px;
+    }
+
+    .hero{
+        padding-top:45px;
+    }
+
+    .hero h1{
+        font-size:38px;
+    }
+
+    .hero-description{
+        font-size:15px;
+    }
+
+    .hero-buttons{
+        flex-direction:column;
+    }
+
+    .btn{
+        width:100%;
+    }
+
+    .stats{
+        gap:20px;
+    }
+
+    .visual{
+        min-height:350px;
+    }
+
+    .profile-card{
+        width:290px;
+
+        transform:
+            perspective(1000px)
+            rotateY(-4deg)
+            rotateX(2deg);
+    }
+
+    .float.one{
+        right:-2px;
+    }
+
+    .float.two{
+        left:-2px;
+    }
+
+    .section{
+        padding:65px 0;
+    }
+
+    .features{
+        grid-template-columns:1fr;
+    }
+
+    .form-row{
+        grid-template-columns:1fr;
+    }
+
+    .order{
+        padding:
+            65px 0
+            80px;
+    }
+
+    .order-box{
+        padding:21px;
+
+        border-radius:17px;
+    }
+
+    .order-info h2{
+        font-size:25px;
+    }
+
+    .footer{
+        flex-direction:column;
+
+        align-items:flex-start;
+    }
+
+}
+
+@media(max-width:400px){
+
+    .hero h1{
+        font-size:34px;
+    }
+
+    .profile-card{
+        width:270px;
+    }
+
+    .float{
+        font-size:10px;
+
+        padding:8px 10px;
+    }
+
+}
+
+
+/* =========================================================
+   ACCESSIBILITY
+========================================================= */
+
+:focus-visible{
+    outline:2px solid var(--gold2);
+
+    outline-offset:3px;
 }
 
 </style>
 
 </head>
 
+
 <body>
 
 
-<!-- =========================================================
+<!-- =======================================================
      FLASH MESSAGES
-========================================================= -->
+======================================================== -->
 
 {% with messages = get_flashed_messages(with_categories=true) %}
 
 {% if messages %}
 
-<div class="flash-container" id="flashContainer">
+<div class="flash-container">
 
 {% for category, message in messages %}
 
@@ -1584,53 +1434,41 @@ footer{
 {% endwith %}
 
 
-<!-- =========================================================
-     NAV
-========================================================= -->
+<!-- =======================================================
+     NAVBAR
+======================================================== -->
 
 <header>
 
-<nav class="nav wrap">
+<div class="navbar container">
 
-<a href="/" class="brand">
+<a href="#home" class="logo">
 
-<span class="badge">
-
-<svg
-viewBox="0 0 24 24"
-fill="none"
-stroke="#080a0f"
-stroke-width="3"
-stroke-linecap="round"
-stroke-linejoin="round">
-
-<polyline points="20 6 9 17 4 12"/>
-
-</svg>
-
-</span>
+<span class="logo-mark">✓</span>
 
 SHOVIX
 
 </a>
 
 
-<div class="nav-links">
+<nav class="nav-links">
+
+<a href="#home">الرئيسية</a>
 
 <a href="#process">كيف نعمل</a>
 
-<a href="#features">لماذا SHOVIX</a>
+<a href="#features">المميزات</a>
 
 <a href="#order">اطلب الآن</a>
 
-</div>
+</nav>
 
 
-<a href="#order" class="nav-cta">
-ابدأ طلبك
+<a href="#order" class="nav-button">
+ابدأ مشروعك
 </a>
 
-</nav>
+</div>
 
 </header>
 
@@ -1638,56 +1476,62 @@ SHOVIX
 <main>
 
 
-<!-- =========================================================
+<!-- =======================================================
      HERO
-========================================================= -->
+======================================================== -->
 
-<section class="hero wrap">
+<section id="home">
+
+<div class="hero container">
+
 
 <div>
 
-<span class="eyebrow">
+<div class="badge">
 
-<span class="dot"></span>
+<span class="badge-dot"></span>
 
 PREMIUM PROFILE STUDIO
 
-</span>
+</div>
 
 
 <h1>
 
-هويتك الرقمية تستاهل تصميم
+هويتك الرقمية
 
 <span>
-بحجم حضورك.
+تستاهل الأفضل.
 </span>
 
 </h1>
 
 
-<p class="lead">
+<p class="hero-description">
 
-SHOVIX يحوّل حسابك أو مشروعك إلى صفحة بروفايل احترافية
-مصممة خصيصًا لك، بهوية بصرية مميزة وتجربة رقمية أنيقة.
+SHOVIX يصمم لك صفحة بروفايل احترافية
+تعكس هويتك وتجمع روابطك ومعلوماتك
+في تجربة رقمية أنيقة وسريعة ومتجاوبة
+مع الهاتف والكمبيوتر.
 
 </p>
 
 
-<div class="actions">
+<div class="hero-buttons">
 
-<a href="#order" class="btn btn-primary">
+<a href="#order"
+   class="btn btn-primary">
 
 ابدأ طلبك الآن
-
-<span>↗</span>
+↗
 
 </a>
 
 
-<a href="#process" class="btn btn-secondary">
+<a href="#process"
+   class="btn btn-secondary">
 
-شاهد كيف نعمل
+كيف نعمل؟
 
 </a>
 
@@ -1698,27 +1542,33 @@ SHOVIX يحوّل حسابك أو مشروعك إلى صفحة بروفايل ا
 
 <div class="stat">
 
-<strong>+300</strong>
+<strong>01</strong>
 
-<span>تصميم احترافي</span>
-
-</div>
-
-
-<div class="stat">
-
-<strong>48H</strong>
-
-<span>وقت التسليم</span>
+<span>
+هوية مخصصة
+</span>
 
 </div>
 
 
 <div class="stat">
 
-<strong>4.9★</strong>
+<strong>02</strong>
 
-<span>رضا العملاء</span>
+<span>
+تصميم احترافي
+</span>
+
+</div>
+
+
+<div class="stat">
+
+<strong>03</strong>
+
+<span>
+متجاوب مع الهاتف
+</span>
 
 </div>
 
@@ -1727,27 +1577,30 @@ SHOVIX يحوّل حسابك أو مشروعك إلى صفحة بروفايل ا
 </div>
 
 
-<!-- PROFILE -->
+<!-- CARD -->
 
-<div class="stage" id="stage">
+<div class="visual"
+     id="visual">
 
 <div class="float one">
 
 ✓ تصميم
-<b>مخصص</b>
+<b>احترافي</b>
 
 </div>
 
 
 <div class="float two">
 
-تسليم خلال
-<b>48 ساعة</b>
+تجربة
+<b>Mobile</b>
 
 </div>
 
 
-<div class="profile-card" id="profileCard">
+<div class="profile-card"
+     id="profileCard">
+
 
 <div class="card-top">
 
@@ -1762,25 +1615,28 @@ SX
 
 <div class="verified">
 
-✓
-
-موثّق
+✓ موثّق
 
 </div>
 
 </div>
 
 
-<div class="profile-name">
+<div class="card-name">
+
 بروفايل العميل
+
 </div>
 
-<div class="handle">
+
+<div class="card-handle">
+
 @your.profile
+
 </div>
 
 
-<div class="lines">
+<div class="card-lines">
 
 <i></i>
 <i></i>
@@ -1789,31 +1645,48 @@ SX
 </div>
 
 
-<div class="metrics">
+<div class="card-metrics">
 
 <div>
 
-<b>12.4K</b>
+<strong>
+12.4K
+</strong>
 
-<span>متابع</span>
+<span>
+متابع
+</span>
 
 </div>
+
 
 <div>
 
-<b>98%</b>
+<strong>
+98%
+</strong>
 
-<span>تفاعل</span>
+<span>
+تفاعل
+</span>
 
 </div>
+
 
 <div>
 
-<b>#SX-08</b>
+<strong>
+SX-01
+</strong>
 
-<span>تصميم</span>
+<span>
+تصميم
+</span>
 
 </div>
+
+</div>
+
 
 </div>
 
@@ -1824,33 +1697,39 @@ SX
 </section>
 
 
-<!-- =========================================================
+<!-- =======================================================
      PROCESS
-========================================================= -->
+======================================================== -->
 
-<section class="section" id="process">
+<section id="process"
+         class="section">
 
-<div class="wrap">
+<div class="container">
 
-<div class="section-head">
 
-<span class="eyebrow">
+<div class="section-title">
 
-<span class="dot"></span>
+<div class="badge">
+
+<span class="badge-dot"></span>
 
 آلية العمل
 
-</span>
+</div>
 
 
 <h2>
-من الطلب إلى التسليم في 3 خطوات
+من الطلب إلى التصميم
+في 3 خطوات بسيطة
 </h2>
 
 
 <p>
-عملية واضحة ومباشرة للحصول على صفحة احترافية
-تعكس هويتك الرقمية.
+
+عملية واضحة وسريعة.
+أرسل التفاصيل، نجهز التصميم،
+ثم نرسل لك النتيجة.
+
 </p>
 
 </div>
@@ -1858,18 +1737,22 @@ SX
 
 <div class="steps">
 
+
 <div class="step">
 
-<div class="number">
+<div class="step-number">
 01
 </div>
 
 <h3>
-ترسل التفاصيل
+أرسل التفاصيل
 </h3>
 
 <p>
-أرسل بياناتك وفكرة التصميم وأي صور أو ملفات تريد استخدامها.
+
+اكتب معلوماتك وفكرة الصفحة
+وأرفق الصور أو الملفات التي تريدها.
+
 </p>
 
 </div>
@@ -1877,7 +1760,7 @@ SX
 
 <div class="step">
 
-<div class="number">
+<div class="step-number">
 02
 </div>
 
@@ -1886,7 +1769,10 @@ SX
 </h3>
 
 <p>
-نجهز لك تصميمًا مخصصًا يناسب هويتك وطريقة ظهورك.
+
+نحوّل فكرتك إلى تصميم احترافي
+متناسب مع هويتك.
+
 </p>
 
 </div>
@@ -1894,19 +1780,23 @@ SX
 
 <div class="step">
 
-<div class="number">
+<div class="step-number">
 03
 </div>
 
 <h3>
-تستلم التصميم
+تستلم النتيجة
 </h3>
 
 <p>
-بعد الانتهاء تتلقى تفاصيل طلبك والتصميم عبر وسيلة التواصل المناسبة.
+
+بعد مراجعة الطلب والتصميم،
+نتواصل معك لإكمال المشروع.
+
 </p>
 
 </div>
+
 
 </div>
 
@@ -1915,15 +1805,18 @@ SX
 </section>
 
 
-<!-- =========================================================
+<!-- =======================================================
      FEATURES
-========================================================= -->
+======================================================== -->
 
-<section class="section">
+<section id="features"
+         class="section">
 
-<div class="wrap">
+<div class="container">
 
-<div class="features" id="features">
+
+<div class="features">
+
 
 <div class="feature">
 
@@ -1932,7 +1825,20 @@ SX
 </strong>
 
 <span>
-كل صفحة يتم تصميمها حسب طلب العميل.
+تصميم يناسبك وليس قالبًا عشوائيًا.
+</span>
+
+</div>
+
+
+<div class="feature">
+
+<strong>
+متجاوب
+</strong>
+
+<span>
+يعمل بشكل ممتاز على الهاتف والكمبيوتر.
 </span>
 
 </div>
@@ -1945,7 +1851,7 @@ SX
 </strong>
 
 <span>
-واجهة حديثة ومناسبة للعلامات الشخصية.
+واجهة عصرية ومرتبة وسريعة.
 </span>
 
 </div>
@@ -1954,27 +1860,15 @@ SX
 <div class="feature">
 
 <strong>
-تواصل مباشر
+طلب مباشر
 </strong>
 
 <span>
-نتابع التفاصيل حتى يصبح التصميم جاهزًا.
+أرسل طلبك من الموقع مباشرة.
 </span>
 
 </div>
 
-
-<div class="feature">
-
-<strong>
-رقم طلب
-</strong>
-
-<span>
-كل طلب يحصل على رقم خاص.
-</span>
-
-</div>
 
 </div>
 
@@ -1983,45 +1877,52 @@ SX
 </section>
 
 
-<!-- =========================================================
+<!-- =======================================================
      ORDER
-========================================================= -->
+======================================================== -->
 
-<section class="order" id="order">
+<section id="order"
+         class="order">
 
-<div class="wrap">
+<div class="container">
+
 
 <div class="order-box">
 
 
 <div class="order-info">
 
-<span class="eyebrow">
 
-<span class="dot"></span>
+<div class="badge">
 
-طلب جديد
+<span class="badge-dot"></span>
 
-</span>
+طلب تصميم جديد
+
+</div>
 
 
 <h2>
-جهّز بياناتك ونبدأ
+جهّز بياناتك
+ونبدأ مشروعك
 </h2>
 
 
 <p>
-أرسل تفاصيل مشروعك وسنراجع الطلب ونتواصل معك.
+
+املأ النموذج وسيتلقى فريق SHOVIX
+طلبك مباشرة لمراجعته والتواصل معك.
+
 </p>
 
 
-<ul class="checks">
+<ul class="check-list">
 
 <li>
 
 <span class="check">✓</span>
 
-بياناتك تستخدم لغرض الطلب فقط.
+بياناتك تستخدم لمعالجة الطلب فقط.
 
 </li>
 
@@ -2039,7 +1940,16 @@ SX
 
 <span class="check">✓</span>
 
-تحصل على رقم طلب بعد الإرسال.
+يتم إنشاء رقم طلب خاص بك.
+
+</li>
+
+
+<li>
+
+<span class="check">✓</span>
+
+الحد الأقصى لحجم الملفات 15MB.
 
 </li>
 
@@ -2053,29 +1963,36 @@ SX
 ===================================================== -->
 
 <form
-class="order-form"
-id="orderForm"
-action="{{ url_for('order') }}"
-method="POST"
-enctype="multipart/form-data"
+    class="order-form"
+    id="orderForm"
+    action="{{ url_for('order') }}"
+    method="POST"
+    enctype="multipart/form-data"
 >
 
+
 <div class="form-row">
+
 
 <div class="field">
 
 <label for="name">
+
 الاسم الكامل
+
 <span class="required">*</span>
+
 </label>
 
+
 <input
-id="name"
-name="name"
-type="text"
-placeholder="مثال: أحمد محمد"
-autocomplete="name"
-required
+    id="name"
+    name="name"
+    type="text"
+    maxlength="80"
+    autocomplete="name"
+    placeholder="اسمك الكامل"
+    required
 >
 
 </div>
@@ -2084,17 +2001,22 @@ required
 <div class="field">
 
 <label for="phone">
+
 رقم الهاتف
+
 <span class="required">*</span>
+
 </label>
 
+
 <input
-id="phone"
-name="phone"
-type="tel"
-placeholder="+972..."
-autocomplete="tel"
-required
+    id="phone"
+    name="phone"
+    type="tel"
+    maxlength="30"
+    autocomplete="tel"
+    placeholder="+972..."
+    required
 >
 
 </div>
@@ -2104,18 +2026,21 @@ required
 
 <div class="form-row">
 
+
 <div class="field">
 
 <label for="email">
 البريد الإلكتروني
 </label>
 
+
 <input
-id="email"
-name="email"
-type="email"
-placeholder="example@email.com"
-autocomplete="email"
+    id="email"
+    name="email"
+    type="email"
+    maxlength="120"
+    autocomplete="email"
+    placeholder="example@gmail.com"
 >
 
 </div>
@@ -2127,9 +2052,10 @@ autocomplete="email"
 نوع الحساب
 </label>
 
+
 <select
-id="client_type"
-name="client_type"
+    id="client_type"
+    name="client_type"
 >
 
 <option value="مشهور">
@@ -2142,6 +2068,10 @@ name="client_type"
 
 <option value="شخصي">
 حساب شخصي
+</option>
+
+<option value="علامة شخصية">
+علامة شخصية
 </option>
 
 <option value="أخرى">
@@ -2157,17 +2087,20 @@ name="client_type"
 
 <div class="form-row">
 
+
 <div class="field">
 
 <label for="profile_name">
 اسم الشهرة / البروفايل
 </label>
 
+
 <input
-id="profile_name"
-name="profile_name"
-type="text"
-placeholder="اسمك الظاهر"
+    id="profile_name"
+    name="profile_name"
+    type="text"
+    maxlength="100"
+    placeholder="اسم البروفايل"
 >
 
 </div>
@@ -2179,11 +2112,13 @@ placeholder="اسمك الظاهر"
 رابط الحساب
 </label>
 
+
 <input
-id="profile_link"
-name="profile_link"
-type="url"
-placeholder="https://..."
+    id="profile_link"
+    name="profile_link"
+    type="url"
+    maxlength="300"
+    placeholder="https://..."
 >
 
 </div>
@@ -2201,11 +2136,13 @@ placeholder="https://..."
 
 </label>
 
+
 <textarea
-id="description"
-name="description"
-placeholder="اكتب فكرتك، الألوان، الروابط، وأي تفاصيل تريدها..."
-required
+    id="description"
+    name="description"
+    maxlength="5000"
+    placeholder="اكتب فكرتك، الألوان المفضلة، الروابط التي تريد إضافتها وأي تفاصيل مهمة..."
+    required
 ></textarea>
 
 </div>
@@ -2214,73 +2151,67 @@ required
 <div class="field">
 
 <label>
-الصور والملفات
+الصور والملفات — اختياري
 </label>
 
 
-<div class="dropzone" id="dropzone">
+<div class="file-box"
+     id="dropzone">
+
 
 <input
-type="file"
-id="files"
-name="files"
-multiple
-accept=".png,.jpg,.jpeg,.webp,.pdf"
+    id="files"
+    name="files"
+    type="file"
+    multiple
+    accept=".png,.jpg,.jpeg,.webp,.pdf"
 >
 
 
-<div class="upload-icon">
+<div class="file-icon">
 ↑
 </div>
 
 
-<div class="upload-text">
+<div class="file-title">
 
-<b>
-اضغط للرفع
-</b>
-
-أو اسحب الملفات هنا
+اضغط لاختيار الملفات
+أو اسحبها هنا
 
 </div>
 
 
-<div class="upload-hint">
+<div class="file-hint">
 
-PNG / JPG / WEBP / PDF — حتى 15MB
+PNG / JPG / WEBP / PDF
+— حتى 15MB إجمالًا
 
 </div>
-
-</div>
-
-
-<div class="files-list" id="fileList"></div>
 
 </div>
 
 
-<div class="submit">
+<div
+    class="file-list"
+    id="fileList"
+></div>
+
+</div>
+
 
 <button
-type="submit"
-id="submitBtn"
+    class="submit"
+    id="submitBtn"
+    type="submit"
 >
 
-إرسال الطلب
-↗
+✦ إرسال طلب التصميم
 
 </button>
 
 
-<span class="submit-note">
-
-سيظهر رقم الطلب بعد الإرسال.
-
-</span>
-
-</div>
-
 </form>
+
 
 </div>
 
@@ -2288,33 +2219,23 @@ id="submitBtn"
 
 </section>
 
+
 </main>
 
 
-<!-- =========================================================
+<!-- =======================================================
      FOOTER
-========================================================= -->
+======================================================== -->
 
 <footer>
 
-<div class="footer wrap">
+<div class="footer container">
 
-<div class="brand">
 
-<span class="badge">
+<div class="logo">
 
-<svg
-viewBox="0 0 24 24"
-fill="none"
-stroke="#080a0f"
-stroke-width="3"
-stroke-linecap="round"
-stroke-linejoin="round">
-
-<polyline points="20 6 9 17 4 12"/>
-
-</svg>
-
+<span class="logo-mark">
+✓
 </span>
 
 SHOVIX
@@ -2322,9 +2243,12 @@ SHOVIX
 </div>
 
 
-<p>
-© <span id="year"></span> SHOVIX — جميع الحقوق محفوظة.
-</p>
+<div class="footer-text">
+
+© <span id="year"></span>
+SHOVIX — جميع الحقوق محفوظة.
+
+</div>
 
 </div>
 
@@ -2332,6 +2256,7 @@ SHOVIX
 
 
 <script>
+
 
 /* =========================================================
    YEAR
@@ -2342,55 +2267,65 @@ document.getElementById("year").textContent =
 
 
 /* =========================================================
-   CARD EFFECT
+   PROFILE CARD EFFECT
 ========================================================= */
 
 (function(){
 
-    const stage =
-        document.getElementById("stage");
+    const visual =
+        document.getElementById("visual");
 
     const card =
         document.getElementById("profileCard");
 
-    if(!stage || !card) return;
+    if(!visual || !card){
+        return;
+    }
 
-    const reduce =
-        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const reduceMotion =
+        window.matchMedia(
+            "(prefers-reduced-motion: reduce)"
+        ).matches;
 
-    if(reduce) return;
+    if(reduceMotion){
+        return;
+    }
 
-    stage.addEventListener(
+    visual.addEventListener(
         "mousemove",
-        function(e){
+        function(event){
 
             const rect =
-                stage.getBoundingClientRect();
+                visual.getBoundingClientRect();
 
             const x =
-                (e.clientX - rect.left) /
-                rect.width - .5;
+                (event.clientX - rect.left)
+                / rect.width - 0.5;
 
             const y =
-                (e.clientY - rect.top) /
-                rect.height - .5;
+                (event.clientY - rect.top)
+                / rect.height - 0.5;
 
             card.style.transform =
-                "rotateY(" +
-                (-10 - x * 14) +
-                "deg) rotateX(" +
-                (6 + y * 10) +
+                "perspective(1000px)" +
+                " rotateY(" +
+                (-9 - x * 12) +
+                "deg)" +
+                " rotateX(" +
+                (5 + y * 8) +
                 "deg)";
 
         }
     );
 
-    stage.addEventListener(
+    visual.addEventListener(
         "mouseleave",
         function(){
 
             card.style.transform =
-                "rotateY(-10deg) rotateX(6deg)";
+                "perspective(1000px)" +
+                " rotateY(-9deg)" +
+                " rotateX(5deg)";
 
         }
     );
@@ -2399,7 +2334,7 @@ document.getElementById("year").textContent =
 
 
 /* =========================================================
-   FILE UPLOAD
+   FILE VALIDATION / DISPLAY
 ========================================================= */
 
 (function(){
@@ -2407,24 +2342,39 @@ document.getElementById("year").textContent =
     const input =
         document.getElementById("files");
 
-    const dropzone =
-        document.getElementById("dropzone");
-
     const list =
         document.getElementById("fileList");
 
-    if(!input || !dropzone || !list)
+    const dropzone =
+        document.getElementById("dropzone");
+
+    if(!input || !list){
         return;
+    }
 
+    const allowed = [
+        "png",
+        "jpg",
+        "jpeg",
+        "webp",
+        "pdf"
+    ];
 
-    function renderFiles(){
+    const maxTotal =
+        15 * 1024 * 1024;
+
+    function render(){
 
         list.innerHTML = "";
+
+        let total = 0;
 
         const files =
             Array.from(input.files || []);
 
         files.forEach(function(file){
+
+            total += file.size;
 
             const item =
                 document.createElement("div");
@@ -2433,93 +2383,125 @@ document.getElementById("year").textContent =
                 "file-item";
 
             const size =
-                (file.size / 1024 / 1024)
-                .toFixed(2);
+                file.size < 1024 * 1024
+                ? (file.size / 1024).toFixed(0) + " KB"
+                : (file.size / 1024 / 1024).toFixed(2) + " MB";
 
-            const nameSpan = document.createElement("span");
-            nameSpan.textContent = file.name;
-
-            const sizeSpan = document.createElement("span");
-            sizeSpan.textContent = size + " MB";
-
-            item.appendChild(nameSpan);
-            item.appendChild(sizeSpan);
+            item.innerHTML =
+                "<span>" +
+                escapeHTML(file.name) +
+                "</span>" +
+                "<span>" +
+                size +
+                "</span>";
 
             list.appendChild(item);
 
         });
+
+        if(files.length > 8){
+
+            list.innerHTML +=
+                '<div class="file-item">' +
+                '<span>الحد الأقصى 8 ملفات</span>' +
+                '</div>';
+
+        }
+
+        if(total > maxTotal){
+
+            list.innerHTML +=
+                '<div class="file-item">' +
+                '<span>حجم الملفات يتجاوز 15MB</span>' +
+                '</div>';
+
+        }
+
+    }
+
+
+    function escapeHTML(text){
+
+        return String(text)
+            .replace(/&/g,"&amp;")
+            .replace(/</g,"&lt;")
+            .replace(/>/g,"&gt;")
+            .replace(/"/g,"&quot;")
+            .replace(/'/g,"&#039;");
 
     }
 
 
     input.addEventListener(
         "change",
-        renderFiles
+        render
     );
 
 
-    ["dragenter","dragover"].forEach(
-        function(eventName){
+    if(dropzone){
+
+        ["dragenter","dragover"]
+        .forEach(function(eventName){
 
             dropzone.addEventListener(
                 eventName,
-                function(e){
+                function(event){
 
-                    e.preventDefault();
+                    event.preventDefault();
 
-                    dropzone.classList.add("drag");
+                    dropzone.style.borderColor =
+                        "var(--gold)";
 
                 }
             );
 
-        }
-    );
+        });
 
 
-    ["dragleave","drop"].forEach(
-        function(eventName){
+        ["dragleave","drop"]
+        .forEach(function(eventName){
 
             dropzone.addEventListener(
                 eventName,
-                function(e){
+                function(event){
 
-                    e.preventDefault();
+                    event.preventDefault();
 
-                    dropzone.classList.remove("drag");
+                    dropzone.style.borderColor =
+                        "#343d4c";
 
                 }
             );
 
-        }
-    );
+        });
 
 
-    dropzone.addEventListener(
-        "drop",
-        function(e){
+        dropzone.addEventListener(
+            "drop",
+            function(event){
 
-            if(
-                e.dataTransfer &&
-                e.dataTransfer.files.length
-            ){
+                if(
+                    event.dataTransfer &&
+                    event.dataTransfer.files.length
+                ){
 
-                input.files =
-                    e.dataTransfer.files;
+                    input.files =
+                        event.dataTransfer.files;
 
-                renderFiles();
+                    render();
+
+                }
 
             }
+        );
 
-        }
-    );
+    }
 
 })();
 
 
 /* =========================================================
-   FORM SUBMIT
-   بيضمن POST دايمًا عن طريق fetch، وبيمنع الضغط المتكرر
-   على الزرار، وبيوضح لو حصل خطأ بدل ما يفضل عالق.
+   FORM SUBMIT UX
 ========================================================= */
 
 (function(){
@@ -2530,68 +2512,22 @@ document.getElementById("year").textContent =
     const button =
         document.getElementById("submitBtn");
 
-    if(!form || !button)
+    if(!form || !button){
         return;
-
-    const ORDER_URL =
-        form.getAttribute("action") || "/order";
-
-    const originalHTML =
-        button.innerHTML;
+    }
 
     form.addEventListener(
         "submit",
-        function(e){
+        function(){
 
-            e.preventDefault();
-
-            if(button.disabled)
+            if(!form.checkValidity()){
                 return;
+            }
 
             button.disabled = true;
 
             button.textContent =
                 "جاري إرسال الطلب...";
-
-            const formData =
-                new FormData(form);
-
-            fetch(ORDER_URL, {
-                method: "POST",
-                body: formData,
-                credentials: "same-origin",
-                redirect: "follow"
-            })
-            .then(function(response){
-
-                if(response.status === 405){
-                    throw new Error(
-                        "السيرفر رفض الطريقة المستخدمة (405). تأكد إن الراوت في app.py يقبل POST."
-                    );
-                }
-
-                window.location.href =
-                    response.url || "/";
-
-            })
-            .catch(function(err){
-
-                console.error(
-                    "Order submit error:",
-                    err
-                );
-
-                button.disabled = false;
-
-                button.innerHTML =
-                    originalHTML;
-
-                alert(
-                    "حصل خطأ أثناء إرسال الطلب: " +
-                    err.message
-                );
-
-            });
 
         }
     );
@@ -2603,33 +2539,34 @@ document.getElementById("year").textContent =
    FLASH AUTO HIDE
 ========================================================= */
 
-(function(){
+setTimeout(
+    function(){
 
-    const container =
-        document.getElementById("flashContainer");
+        const flashes =
+            document.querySelectorAll(".flash");
 
-    if(!container) return;
+        flashes.forEach(
+            function(element){
 
-    setTimeout(
-        function(){
+                element.style.transition =
+                    "opacity .5s ease";
 
-            container.style.transition =
-                "opacity .4s ease";
+                element.style.opacity = "0";
 
-            container.style.opacity = "0";
+                setTimeout(
+                    function(){
+                        element.remove();
+                    },
+                    500
+                );
 
-            setTimeout(
-                function(){
-                    container.remove();
-                },
-                500
-            );
+            }
+        );
 
-        },
-        7000
-    );
+    },
+    7000
+);
 
-})();
 
 </script>
 
@@ -2643,6 +2580,9 @@ document.getElementById("year").textContent =
 # =========================================================
 
 def allowed_file(filename):
+    """
+    التأكد من امتداد الملف.
+    """
 
     if not filename:
         return False
@@ -2650,16 +2590,64 @@ def allowed_file(filename):
     if "." not in filename:
         return False
 
-    extension = filename.rsplit(".", 1)[1].lower()
+    extension = filename.rsplit(
+        ".",
+        1
+    )[1].lower()
 
     return extension in ALLOWED_EXTENSIONS
 
 
-def is_valid_email(value):
-    return bool(EMAIL_REGEX.match(value))
+def valid_email(email):
+    """
+    فحص بسيط للبريد الإلكتروني.
+    """
+
+    if not email:
+        return True
+
+    pattern = (
+        r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
+    )
+
+    return bool(
+        re.match(
+            pattern,
+            email
+        )
+    )
 
 
-def create_request_hash(name, phone, description):
+def valid_url(value):
+    """
+    يسمح بروابط HTTP/HTTPS فقط.
+    """
+
+    if not value:
+        return True
+
+    try:
+
+        parsed = urlparse(value)
+
+        return parsed.scheme in (
+            "http",
+            "https"
+        ) and bool(parsed.netloc)
+
+    except Exception:
+        return False
+
+
+def create_request_hash(
+    name,
+    phone,
+    description
+):
+    """
+    إنشاء بصمة للطلب لمنع التكرار
+    داخل نفس Session.
+    """
 
     raw = (
         name.strip().lower()
@@ -2678,42 +2666,54 @@ def create_request_hash(name, phone, description):
 # SEND EMAIL
 # =========================================================
 
-def send_order_email(data, files):
+def send_order_email(
+    data,
+    files
+):
 
     if not OWNER_EMAIL:
+
         raise RuntimeError(
             "OWNER_EMAIL غير موجود."
         )
 
     if not GMAIL_APP_PASSWORD:
+
         raise RuntimeError(
             "GMAIL_APP_PASSWORD غير موجود."
         )
 
-    order_id = str(uuid.uuid4())[:8].upper()
 
-    now = datetime.now().strftime(
-        "%Y-%m-%d %H:%M:%S"
+    order_id = (
+        str(uuid.uuid4())
+        .replace("-", "")
+        [:8]
+        .upper()
     )
 
+
     message = EmailMessage()
+
 
     message["Subject"] = (
         f"SHOVIX | طلب #{order_id} | "
         f"{data['name']}"
     )
 
+
     message["From"] = OWNER_EMAIL
 
     message["To"] = OWNER_EMAIL
 
-    if data.get("email"):
-        message["Reply-To"] = data["email"]
+
+    now = datetime.now().strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
 
 
     body = f"""
 SHOVIX
-PREMIUM PROFILE STUDIO
+Professional Profile Studio
 ========================================
 
 طلب تصميم جديد
@@ -2725,20 +2725,20 @@ PREMIUM PROFILE STUDIO
 {now}
 
 ----------------------------------------
-بيانات العميل
+معلومات العميل
 ----------------------------------------
 
 الاسم:
 {data["name"]}
 
-الهاتف:
+رقم الهاتف:
 {data["phone"]}
 
-البريد:
+البريد الإلكتروني:
 {data.get("email") or "غير محدد"}
 
 نوع الحساب:
-{data["client_type"]}
+{data.get("client_type") or "غير محدد"}
 
 اسم البروفايل:
 {data.get("profile_name") or "غير محدد"}
@@ -2753,10 +2753,10 @@ PREMIUM PROFILE STUDIO
 {data["description"]}
 
 ========================================
-
 SHOVIX
 Professional Profile Studio
 """
+
 
     message.set_content(body)
 
@@ -2765,24 +2765,7 @@ Professional Profile Studio
     # ATTACHMENTS
     # =====================================================
 
-    mime_types = {
-
-        "png":
-            ("image", "png"),
-
-        "jpg":
-            ("image", "jpeg"),
-
-        "jpeg":
-            ("image", "jpeg"),
-
-        "webp":
-            ("image", "webp"),
-
-        "pdf":
-            ("application", "pdf")
-    }
-
+    attachment_count = 0
 
     for file in files:
 
@@ -2792,10 +2775,14 @@ Professional Profile Studio
         if not file.filename:
             continue
 
+        if attachment_count >= MAX_FILES:
+            break
+
         if not allowed_file(
             file.filename
         ):
             continue
+
 
         filename = secure_filename(
             file.filename
@@ -2804,42 +2791,73 @@ Professional Profile Studio
         if not filename:
             continue
 
+
         file_data = file.read()
+
 
         if not file_data:
             continue
+
 
         extension = filename.rsplit(
             ".",
             1
         )[1].lower()
 
-        maintype, subtype = mime_types[
-            extension
-        ]
+
+        mime_types = {
+
+            "png":
+                ("image", "png"),
+
+            "jpg":
+                ("image", "jpeg"),
+
+            "jpeg":
+                ("image", "jpeg"),
+
+            "webp":
+                ("image", "webp"),
+
+            "pdf":
+                ("application", "pdf")
+        }
+
+
+        maintype, subtype = (
+            mime_types.get(
+                extension,
+                (
+                    "application",
+                    "octet-stream"
+                )
+            )
+        )
+
 
         message.add_attachment(
-
             file_data,
-
             maintype=maintype,
-
             subtype=subtype,
-
             filename=filename
         )
 
 
+        attachment_count += 1
+
+
     # =====================================================
-    # GMAIL
+    # GMAIL SMTP
     # =====================================================
 
     context = ssl.create_default_context()
 
+
     with smtplib.SMTP_SSL(
         "smtp.gmail.com",
         465,
-        context=context
+        context=context,
+        timeout=30
     ) as server:
 
         server.login(
@@ -2859,7 +2877,10 @@ Professional Profile Studio
 # HOME
 # =========================================================
 
-@app.route("/", methods=["GET"])
+@app.route(
+    "/",
+    methods=["GET"]
+)
 def home():
 
     return render_template_string(
@@ -2869,6 +2890,11 @@ def home():
 
 # =========================================================
 # ORDER
+#
+# GET  -> redirect
+# POST -> process
+#
+# هذا يمنع مشكلة 405 عند فتح /order مباشرة.
 # =========================================================
 
 @app.route(
@@ -2877,12 +2903,6 @@ def home():
 )
 def order():
 
-    # -----------------------------------------------------
-    # مهم جدًا:
-    # إذا دخل شخص إلى /order مباشرة في المتصفح
-    # لن يظهر 405.
-    # -----------------------------------------------------
-
     if request.method == "GET":
 
         return redirect(
@@ -2890,39 +2910,45 @@ def order():
         )
 
 
-    # -----------------------------------------------------
+    # =====================================================
     # FORM DATA
-    # -----------------------------------------------------
+    # =====================================================
 
     name = request.form.get(
         "name",
         ""
     ).strip()
 
+
     phone = request.form.get(
         "phone",
         ""
     ).strip()
+
 
     email = request.form.get(
         "email",
         ""
     ).strip()
 
+
     client_type = request.form.get(
         "client_type",
         "مشهور"
     ).strip()
+
 
     profile_name = request.form.get(
         "profile_name",
         ""
     ).strip()
 
+
     profile_link = request.form.get(
         "profile_link",
         ""
     ).strip()
+
 
     description = request.form.get(
         "description",
@@ -2930,19 +2956,31 @@ def order():
     ).strip()
 
 
-    # -----------------------------------------------------
-    # VALIDATION
-    # -----------------------------------------------------
+    # =====================================================
+    # BASIC VALIDATION
+    # =====================================================
 
     if not name:
 
         flash(
-            "يرجى كتابة الاسم الكامل.",
+            "يرجى كتابة الاسم.",
             "error"
         )
 
         return redirect(
-            url_for("home") + "#order"
+            url_for("home")
+        )
+
+
+    if len(name) > 80:
+
+        flash(
+            "الاسم طويل جدًا.",
+            "error"
+        )
+
+        return redirect(
+            url_for("home")
         )
 
 
@@ -2954,7 +2992,47 @@ def order():
         )
 
         return redirect(
-            url_for("home") + "#order"
+            url_for("home")
+        )
+
+
+    if len(phone) > 30:
+
+        flash(
+            "رقم الهاتف غير صالح.",
+            "error"
+        )
+
+        return redirect(
+            url_for("home")
+        )
+
+
+    if email and not valid_email(
+        email
+    ):
+
+        flash(
+            "البريد الإلكتروني غير صالح.",
+            "error"
+        )
+
+        return redirect(
+            url_for("home")
+        )
+
+
+    if profile_link and not valid_url(
+        profile_link
+    ):
+
+        flash(
+            "رابط الحساب يجب أن يبدأ بـ http أو https.",
+            "error"
+        )
+
+        return redirect(
+            url_for("home")
         )
 
 
@@ -2966,26 +3044,25 @@ def order():
         )
 
         return redirect(
-            url_for("home") + "#order"
+            url_for("home")
         )
 
 
-    # البريد الإلكتروني اختياري، لكن لو اتكتب لازم يكون صحيح
-    if email and not is_valid_email(email):
+    if len(description) > 5000:
 
         flash(
-            "صيغة البريد الإلكتروني غير صحيحة.",
+            "تفاصيل المشروع طويلة جدًا.",
             "error"
         )
 
         return redirect(
-            url_for("home") + "#order"
+            url_for("home")
         )
 
 
-    # -----------------------------------------------------
+    # =====================================================
     # DUPLICATE PROTECTION
-    # -----------------------------------------------------
+    # =====================================================
 
     request_hash = create_request_hash(
         name,
@@ -2993,9 +3070,11 @@ def order():
         description
     )
 
+
     previous_hash = session.get(
         "last_request_hash"
     )
+
 
     if previous_hash == request_hash:
 
@@ -3005,22 +3084,33 @@ def order():
         )
 
         return redirect(
-            url_for("home") + "#order"
+            url_for("home")
         )
 
 
-    # -----------------------------------------------------
+    # =====================================================
     # FILES
-    # -----------------------------------------------------
+    # =====================================================
 
     files = request.files.getlist(
         "files"
     )
 
 
-    # -----------------------------------------------------
-    # CHECK FILE EXTENSIONS
-    # -----------------------------------------------------
+    if len(files) > MAX_FILES:
+
+        flash(
+            f"يمكنك إرفاق {MAX_FILES} ملفات كحد أقصى.",
+            "error"
+        )
+
+        return redirect(
+            url_for("home")
+        )
+
+
+    total_size = 0
+
 
     for file in files:
 
@@ -3030,23 +3120,29 @@ def order():
         if not file.filename:
             continue
 
+
         if not allowed_file(
             file.filename
         ):
 
             flash(
-                f"نوع الملف غير مسموح: {file.filename}",
+                "يوجد ملف غير مسموح به. المسموح: PNG, JPG, WEBP, PDF.",
                 "error"
             )
 
             return redirect(
-                url_for("home") + "#order"
+                url_for("home")
             )
 
 
-    # -----------------------------------------------------
+        # لا نقرأ الملف هنا.
+        # Flask سيطبق MAX_CONTENT_LENGTH
+        # على الطلب بالكامل.
+
+
+    # =====================================================
     # SEND
-    # -----------------------------------------------------
+    # =====================================================
 
     try:
 
@@ -3054,17 +3150,11 @@ def order():
 
             {
                 "name": name,
-
                 "phone": phone,
-
                 "email": email,
-
                 "client_type": client_type,
-
                 "profile_name": profile_name,
-
                 "profile_link": profile_link,
-
                 "description": description
             },
 
@@ -3090,7 +3180,7 @@ def order():
         )
 
         flash(
-            "تعذر تسجيل الدخول إلى Gmail. تأكد من App Password.",
+            "تعذر الاتصال بالبريد. تحقق من Gmail App Password.",
             "error"
         )
 
@@ -3103,7 +3193,7 @@ def order():
         )
 
         flash(
-            "حدث خطأ في اتصال البريد الإلكتروني.",
+            "حدث خطأ في اتصال البريد. حاول مرة أخرى.",
             "error"
         )
 
@@ -3111,18 +3201,18 @@ def order():
     except Exception as error:
 
         print(
-            "SHOVIX ERROR:",
+            "SHOVIX ORDER ERROR:",
             error
         )
 
         flash(
-            "حدث خطأ أثناء إرسال الطلب.",
+            "حدث خطأ أثناء إرسال الطلب. حاول مرة أخرى.",
             "error"
         )
 
 
     return redirect(
-        url_for("home") + "#order"
+        url_for("home")
     )
 
 
@@ -3134,12 +3224,12 @@ def order():
 def file_too_large(error):
 
     flash(
-        "حجم الملفات أكبر من 15MB.",
+        "حجم الملفات كبير جدًا. الحد الأقصى 15MB.",
         "error"
     )
 
     return redirect(
-        url_for("home") + "#order"
+        url_for("home")
     )
 
 
@@ -3148,7 +3238,24 @@ def file_too_large(error):
 # =========================================================
 
 @app.errorhandler(404)
-def page_not_found(error):
+def not_found(error):
+
+    return redirect(
+        url_for("home")
+    )
+
+
+# =========================================================
+# 405
+# =========================================================
+
+@app.errorhandler(405)
+def method_not_allowed(error):
+
+    flash(
+        "طريقة الطلب غير مسموحة.",
+        "error"
+    )
 
     return redirect(
         url_for("home")
@@ -3168,7 +3275,7 @@ def internal_error(error):
     )
 
     flash(
-        "حدث خطأ داخلي في الخادم.",
+        "حدث خطأ في الخادم. حاول مرة أخرى.",
         "error"
     )
 
@@ -3189,6 +3296,7 @@ if __name__ == "__main__":
             "5000"
         )
     )
+
 
     app.run(
         host="0.0.0.0",
