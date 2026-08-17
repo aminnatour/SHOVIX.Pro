@@ -269,23 +269,6 @@
   .feat span{ color:var(--slate-dim); font-size:13px; }
 
   /* =========================================================
-     FLASH MESSAGES
-  ========================================================= */
-  .flash-stack{
-    position:fixed; top:90px; left:50%; transform:translateX(-50%);
-    z-index:200; display:flex; flex-direction:column; gap:10px; width:min(92%, 460px);
-  }
-  .flash{
-    font-size:14px; padding:14px 18px; border-radius:12px; border:1px solid;
-    display:flex; align-items:center; gap:10px;
-    box-shadow:0 20px 40px -18px rgba(0,0,0,0.6);
-    animation:flashIn .25s ease;
-  }
-  .flash.success{ background:rgba(76,174,125,0.12); border-color:rgba(76,174,125,0.4); color:#bdeed4; }
-  .flash.error{ background:rgba(225,89,79,0.12); border-color:rgba(225,89,79,0.4); color:#f6c9c5; }
-  @keyframes flashIn{ from{ opacity:0; transform:translate(-50%, -10px); } to{ opacity:1; transform:translate(-50%,0); } }
-
-  /* =========================================================
      ORDER FORM
   ========================================================= */
   .order-section{ padding:70px 0 100px; border-top:1px solid var(--line); }
@@ -685,16 +668,6 @@
     });
   })();
 
-  // ---- auto-dismiss flash messages ----
-  (function(){
-    var stack = document.getElementById('flash-stack');
-    if(!stack) return;
-    setTimeout(function(){
-      stack.style.transition = 'opacity .4s ease';
-      stack.style.opacity = '0';
-      setTimeout(function(){ stack.remove(); }, 450);
-    }, 6000);
-  })();
 </script>
 
 </body>
