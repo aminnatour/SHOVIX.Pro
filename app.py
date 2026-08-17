@@ -40,7 +40,7 @@ APP_NAME = "SHOVIX"
 # ضع إيميل SHOVIX هنا
 # ------------------------------------------------------------
 
-OWNER_EMAIL = "YOUR_EMAIL@gmail.com"
+OWNER_EMAIL = "amennatour81@gmail.com"
 
 # ------------------------------------------------------------
 # ضع Gmail App Password هنا
@@ -51,13 +51,13 @@ OWNER_EMAIL = "YOUR_EMAIL@gmail.com"
 # لا تستخدم كلمة مرور Gmail العادية.
 # ------------------------------------------------------------
 
-GMAIL_APP_PASSWORD = "YOUR_GMAIL_APP_PASSWORD"
+GMAIL_APP_PASSWORD = "yrkk lacf teup zqnp"
 
 # ------------------------------------------------------------
 # كلمة مرور لوحة الإدارة
 # ------------------------------------------------------------
 
-ADMIN_PASSWORD = "CHANGE_THIS_ADMIN_PASSWORD"
+ADMIN_PASSWORD = "FKYOU B R YOU MATHR ###############@@@@@@@@@i@n@jk@ln@lk@nl@n@kn@l@knlkn@"
 
 # ------------------------------------------------------------
 # بيانات التطبيق
