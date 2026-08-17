@@ -6,6 +6,7 @@ from datetime import datetime
 import smtplib
 import ssl
 import os
+import re
 import uuid
 import hashlib
 
@@ -18,10 +19,16 @@ load_dotenv()
 
 app = Flask(__name__)
 
-app.secret_key = os.getenv(
-    "SECRET_KEY",
-    "shovix-secret-key-change-this"
-)
+# ---------------------------------------------------------
+# SECRET_KEY: إجباري من .env — لا نسمح بقيمة افتراضية
+# لأن أي قيمة ثابتة في الكود المصدري تضعف تشفير الـ session
+# ---------------------------------------------------------
+app.secret_key = os.getenv("SECRET_KEY")
+
+if not app.secret_key:
+    raise RuntimeError(
+        "SECRET_KEY غير موجود في ملف .env — أضِفه قبل تشغيل السيرفر."
+    )
 
 
 # =========================================================
@@ -29,7 +36,10 @@ app.secret_key = os.getenv(
 # =========================================================
 
 OWNER_EMAIL = os.getenv("OWNER_EMAIL")
-GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
+
+# Gmail App Password أحيانًا بييجي بمسافات بين كل 4 أحرف
+# (مثال: "abcd efgh ijkl mnop") — لازم نشيلها عشان الـ login ينجح
+GMAIL_APP_PASSWORD = (os.getenv("GMAIL_APP_PASSWORD") or "").replace(" ", "").strip()
 
 
 # =========================================================
@@ -46,6 +56,8 @@ ALLOWED_EXTENSIONS = {
 
 app.config["MAX_CONTENT_LENGTH"] = 15 * 1024 * 1024
 
+EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
 
 # =========================================================
 # HELPERS
@@ -57,6 +69,10 @@ def allowed_file(filename):
         and filename.rsplit(".", 1)[1].lower()
         in ALLOWED_EXTENSIONS
     )
+
+
+def is_valid_email(value):
+    return bool(EMAIL_REGEX.match(value))
 
 
 def create_request_hash(name, phone, description):
@@ -179,6 +195,9 @@ Professional Profile Studio
             continue
 
         file_data = file.read()
+
+        if not file_data:
+            continue
 
         extension = filename.rsplit(
             ".",
@@ -339,6 +358,18 @@ def order():
             url_for("home")
         )
 
+    # البريد الإلكتروني اختياري، لكن لو اتكتب لازم يكون بصيغة صحيحة
+    if email and not is_valid_email(email):
+
+        flash(
+            "صيغة البريد الإلكتروني غير صحيحة.",
+            "error"
+        )
+
+        return redirect(
+            url_for("home")
+        )
+
     # =====================================================
     # DUPLICATE PROTECTION
     # =====================================================
@@ -371,6 +402,21 @@ def order():
     files = request.files.getlist(
         "files"
     )
+
+    # نتحقق من صيغة كل ملف قبل الإرسال، ونبلّغ المستخدم
+    # بدل ما نتجاهل الملف المرفوض بصمت
+    for f in files:
+
+        if f and f.filename and not allowed_file(f.filename):
+
+            flash(
+                f"الملف \"{f.filename}\" بصيغة غير مدعومة. الصيغ المسموحة: PNG, JPG, JPEG, WEBP, PDF.",
+                "error"
+            )
+
+            return redirect(
+                url_for("home")
+            )
 
     # =====================================================
     # SEND EMAIL
