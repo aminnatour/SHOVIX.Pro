@@ -60,10 +60,6 @@ def allowed_file(filename):
 
 
 def create_request_hash(name, phone, description):
-    """
-    إنشاء بصمة للطلب لمنع إرسال نفس الطلب
-    عدة مرات خلال نفس جلسة المستخدم.
-    """
 
     raw = (
         name.strip().lower()
@@ -94,14 +90,12 @@ def send_order_email(data, files):
             "GMAIL_APP_PASSWORD غير موجود في ملف .env"
         )
 
-    # رقم خاص بالطلب
     order_id = str(uuid.uuid4())[:8].upper()
 
     message = EmailMessage()
 
     message["Subject"] = (
-        f"SHOVIX | طلب #{order_id} | صفحة بروفايل | "
-        f"{data['name']}"
+        f"SHOVIX | طلب #{order_id} | {data['name']}"
     )
 
     message["From"] = OWNER_EMAIL
@@ -134,7 +128,7 @@ Professional Profile Studio
 البريد الإلكتروني:
 {data.get("email") or "غير محدد"}
 
-نوع العميل:
+نوع الحساب:
 {data["client_type"]}
 
 اسم الشهرة / البروفايل:
@@ -142,12 +136,6 @@ Professional Profile Studio
 
 رابط الحساب:
 {data.get("profile_link") or "غير محدد"}
-
-----------------------------------------
-الخدمة
-----------------------------------------
-
-تصميم صفحة بروفايل احترافية
 
 ----------------------------------------
 تفاصيل المشروع
@@ -259,12 +247,24 @@ def home():
 
 @app.route(
     "/order",
-    methods=["POST"]
+    methods=["GET", "POST"]
 )
 def order():
 
     # =====================================================
-    # GET FORM DATA
+    # GET
+    # =====================================================
+
+    # إذا قام شخص بفتح /order مباشرة
+    # لن يظهر 405
+    if request.method == "GET":
+
+        return redirect(
+            url_for("home")
+        )
+
+    # =====================================================
+    # POST
     # =====================================================
 
     name = request.form.get(
@@ -302,7 +302,6 @@ def order():
         ""
     ).strip()
 
-
     # =====================================================
     # VALIDATION
     # =====================================================
@@ -318,7 +317,6 @@ def order():
             url_for("home")
         )
 
-
     if not phone:
 
         flash(
@@ -330,7 +328,6 @@ def order():
             url_for("home")
         )
 
-
     if not description:
 
         flash(
@@ -341,7 +338,6 @@ def order():
         return redirect(
             url_for("home")
         )
-
 
     # =====================================================
     # DUPLICATE PROTECTION
@@ -368,7 +364,6 @@ def order():
             url_for("home")
         )
 
-
     # =====================================================
     # FILES
     # =====================================================
@@ -376,7 +371,6 @@ def order():
     files = request.files.getlist(
         "files"
     )
-
 
     # =====================================================
     # SEND EMAIL
@@ -399,7 +393,7 @@ def order():
             files
         )
 
-        # حفظ بصمة الطلب بعد نجاح الإرسال فقط
+        # حفظ الطلب بعد نجاح الإرسال
         session["last_request_hash"] = request_hash
 
         flash(
@@ -407,6 +401,9 @@ def order():
             "success"
         )
 
+    # =====================================================
+    # GMAIL AUTH ERROR
+    # =====================================================
 
     except smtplib.SMTPAuthenticationError:
 
@@ -419,6 +416,9 @@ def order():
             "error"
         )
 
+    # =====================================================
+    # SMTP ERROR
+    # =====================================================
 
     except smtplib.SMTPException as error:
 
@@ -432,6 +432,9 @@ def order():
             "error"
         )
 
+    # =====================================================
+    # GENERAL ERROR
+    # =====================================================
 
     except Exception as error:
 
@@ -444,7 +447,6 @@ def order():
             "حدث خطأ أثناء إرسال الطلب. حاول مرة أخرى.",
             "error"
         )
-
 
     return redirect(
         url_for("home")
@@ -469,7 +471,7 @@ def file_too_large(error):
 
 
 # =========================================================
-# GENERAL ERRORS
+# GENERAL SERVER ERROR
 # =========================================================
 
 @app.errorhandler(500)
@@ -491,7 +493,7 @@ def internal_error(error):
 
 
 # =========================================================
-# RUN
+# RUN SERVER
 # =========================================================
 
 if __name__ == "__main__":
